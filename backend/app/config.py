@@ -40,5 +40,11 @@ class Settings(BaseSettings):
 
     allow_unsigned_dev: bool = False
 
+    # Optional extra HTTP headers to send to the Remnawave panel, formatted
+    # the same way as the bot's REMNAWAVE_HEADERS env: "Key:Value,Key2:Value2".
+    # Used by reverse-proxy installations that gate /api behind a secret
+    # cookie (e.g. eGamesAPI/remnawave-reverse-proxy).
+    remnawave_headers: str = ""
+
 
 settings = Settings()
