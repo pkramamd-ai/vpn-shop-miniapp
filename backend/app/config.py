@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     days_in_month: int = 30
     referral_days: int = 7
 
+    # Postgres DSN for the bot's database (same value as the bot's own
+    # DATABASE_URL). When set, /api/referral returns real numbers and
+    # /api/invoice with method=stars creates a Telegram Stars invoice.
+    # When unset, /api/referral returns zeros and /api/invoice falls back
+    # to a t.me/<bot>?start=buy_<n>_<method> deep link.
+    database_url: str = ""
+
     cors_origins: str = "*"
 
     allow_unsigned_dev: bool = False

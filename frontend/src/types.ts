@@ -23,6 +23,7 @@ export interface ReferralStats {
 export interface InvoiceResponse {
   paymentUrl: string;
   invoiceId: string;
+  isTelegramInvoice: boolean;
 }
 
 export type PaymentMethod = "stars" | "yookassa" | "cryptobot";

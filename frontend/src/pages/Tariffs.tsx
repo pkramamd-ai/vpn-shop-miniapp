@@ -32,7 +32,17 @@ export default function Tariffs() {
     setBusy(true);
     try {
       const inv = await api.createInvoice(selected.months, method);
-      WebApp.openLink(inv.paymentUrl, { try_instant_view: false });
+      if (inv.isTelegramInvoice) {
+        WebApp.openInvoice(inv.paymentUrl, (status) => {
+          if (status === "paid") {
+            WebApp.showAlert("Оплата прошла. Подписка активируется в течение минуты.");
+          } else if (status === "failed") {
+            WebApp.showAlert("Оплата не удалась.");
+          }
+        });
+      } else {
+        WebApp.openTelegramLink(inv.paymentUrl);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
