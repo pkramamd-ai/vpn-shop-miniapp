@@ -4,11 +4,12 @@ Exposed routes:
 - GET  /api/health        -> liveness probe
 - GET  /api/subscription  -> current user's Remnawave subscription state
 - GET  /api/tariffs       -> static tariff list (driven by env)
-- GET  /api/referral      -> referral link & stats (stats are stubs for v0.1)
-- POST /api/invoice       -> returns a payment URL; for v0.1 redirects back to
-                             the bot via a t.me/<botusername>?start=buy_<...>
-                             deep link, since payment flow already lives in the
-                             Go bot.
+- GET  /api/referral      -> referral link & stats (real numbers when
+                             DATABASE_URL is configured)
+- POST /api/invoice       -> for method=stars and DATABASE_URL set, returns a
+                             Telegram createInvoiceLink URL the mini-app opens
+                             via WebApp.openInvoice. Otherwise falls back to a
+                             t.me/<bot>?start=buy_<n>_<method> deep link.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from . import db, telegram
 from .auth import TelegramUser, telegram_user_dep
 from .config import settings
 from .remnawave import remnawave
@@ -30,6 +32,7 @@ from .remnawave import remnawave
 async def lifespan(_: FastAPI):
     yield
     await remnawave.aclose()
+    await db.close()
 
 
 app = FastAPI(title="vpn-shop-miniapp", lifespan=lifespan)
@@ -41,6 +44,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _stars_for(months: int) -> int:
+    return {
+        1: settings.stars_price_1,
+        3: settings.stars_price_3,
+        6: settings.stars_price_6,
+        12: settings.stars_price_12,
+    }[months]
 
 
 class SubscriptionResponse(BaseModel):
@@ -73,6 +85,9 @@ class InvoiceRequest(BaseModel):
 class InvoiceResponse(BaseModel):
     paymentUrl: str
     invoiceId: str
+    # When true, the mini-app should call WebApp.openInvoice(paymentUrl).
+    # Otherwise it should open paymentUrl as a Telegram link.
+    isTelegramInvoice: bool
 
 
 @app.get("/api/health")
@@ -132,10 +147,11 @@ async def get_tariffs() -> list[TariffResponse]:
 @app.get("/api/referral", response_model=ReferralResponse)
 async def get_referral(user: TelegramUser = Depends(telegram_user_dep)) -> ReferralResponse:
     bot = settings.telegram_bot_username or "your_bot"
+    invited, granted = await db.referral_stats(user.id)
     return ReferralResponse(
         link=f"https://t.me/{bot}?start=ref_{user.id}",
-        invitedCount=0,
-        bonusDaysEarned=0,
+        invitedCount=invited,
+        bonusDaysEarned=granted * settings.referral_days,
         bonusDaysPerInvite=settings.referral_days,
     )
 
@@ -145,15 +161,37 @@ async def create_invoice(
     body: InvoiceRequest,
     user: TelegramUser = Depends(telegram_user_dep),
 ) -> InvoiceResponse:
-    """Hand the purchase off to the bot, which already implements all three
-    payment methods. Mini-app deep-links the user back to the bot with a start
-    parameter encoding the chosen plan and method.
+    """Telegram Stars: create a real invoice link the mini-app can open inline.
+    Other methods (or when DATABASE_URL is unset): hand off to the bot via a
+    deep link, since payment flows already live there.
     """
     bot = settings.telegram_bot_username
     if not bot:
         raise HTTPException(500, "TELEGRAM_BOT_USERNAME is not configured")
+
+    if body.method == "stars" and settings.database_url:
+        try:
+            customer_id = await db.upsert_customer(user.id, user.language_code)
+            stars = _stars_for(body.months)
+            purchase_id = await db.insert_stars_purchase(customer_id, body.months, stars)
+            payload = f"{purchase_id}&{user.username or ''}"
+            url = await telegram.create_stars_invoice_link(
+                title=f"VPN — {body.months} mo",
+                description=f"VPN subscription, {body.months} month(s)",
+                payload=payload,
+                stars_amount=stars,
+            )
+        except telegram.TelegramAPIError as exc:
+            raise HTTPException(502, f"telegram: {exc}") from exc
+        return InvoiceResponse(
+            paymentUrl=url,
+            invoiceId=str(purchase_id),
+            isTelegramInvoice=True,
+        )
+
     payload = f"buy_{body.months}_{body.method}"
     return InvoiceResponse(
         paymentUrl=f"https://t.me/{bot}?start={payload}",
         invoiceId=f"{user.id}-{body.months}-{body.method}",
+        isTelegramInvoice=False,
     )

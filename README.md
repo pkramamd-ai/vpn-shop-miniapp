@@ -125,15 +125,25 @@ npm run dev
 
 ---
 
-## Что НЕ сделано (для следующих итераций)
+## Интеграция с ботом
 
-- **Реферальная статистика**: сейчас возвращает нули, нужно подключиться к
-  Postgres бота, читать из таблицы `customer` (`referrals_count`, `bonus_days`).
-- **Покупка прямо из mini-app**: сейчас редирект на бота. Чтобы делать
-  `WebApp.openInvoice` (Telegram Stars) внутри mini-app, нужно добавить в
-  бэкенд эндпоинт, который вызывает `createInvoiceLink` Telegram Bot API.
-- **Бот не обрабатывает start-параметры** `buy_<n>_<method>` — после редиректа
-  юзер попадает в обычное /start меню. Можно допилить в форке отдельным PR.
+Бэкенд может работать **с подключением к базе бота** или без неё.
+Без `DATABASE_URL`:
+- `/api/referral` отдаёт нули, реф-ссылка работает.
+- `/api/invoice` всегда отдаёт `t.me/<bot>?start=buy_<n>_<method>` —
+  юзер кликает «Купить», переходит в бота, там выбирает способ оплаты.
+
+С `DATABASE_URL=postgres://...` (тот же DSN, что у бота):
+- `/api/referral` отдаёт реальные `invitedCount` и `bonusDaysEarned`.
+- `/api/invoice` для `method=stars` создаёт **реальный invoice через
+  `createInvoiceLink`** Telegram Bot API. Mini-app открывает его через
+  `WebApp.openInvoice` — оплата проходит **прямо в mini-app**, юзер не
+  выходит из неё. Бот ловит `successful_payment` через свой обычный
+  webhook и активирует подписку в Remnawave.
+
+Деп-линк `t.me/<bot>?start=buy_<n>` ведёт прямо к экрану выбора способа
+оплаты — это требует патча бота
+([PR #3](https://github.com/pkramamd-ai/remnawave-telegram-shop/pull/3)).
 
 ---
 
