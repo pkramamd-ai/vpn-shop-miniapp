@@ -18,8 +18,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
 
+import os
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db, telegram
@@ -195,3 +198,10 @@ async def create_invoice(
         invoiceId=f"{user.id}-{body.months}-{body.method}",
         isTelegramInvoice=False,
     )
+
+
+# When the frontend is bundled into the same image, serve it from /static.
+# Mounted last so /api/* routes win.
+_static_dir = os.environ.get("STATIC_DIR", "/app/static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="frontend")
